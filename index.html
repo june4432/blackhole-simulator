@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Black Hole Simulator | 블랙홀 시뮬레이터</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      overflow: hidden;
+      background: #000;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      position: fixed;
+      top: 0;
+      left: 0;
+    }
+
+    #info-panel {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      font-size: 14px;
+      min-width: 280px;
+      backdrop-filter: blur(10px);
+      z-index: 100;
+    }
+
+    #info-panel h1 {
+      font-size: 18px;
+      margin-bottom: 15px;
+      color: #ff6b35;
+    }
+
+    #info-panel .section {
+      margin-bottom: 15px;
+    }
+
+    #info-panel .section h2 {
+      font-size: 12px;
+      color: #888;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    #info-panel .value {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 5px;
+    }
+
+    #info-panel .value .label {
+      color: #aaa;
+    }
+
+    #info-panel .value .number {
+      color: #4ecdc4;
+      font-family: 'Monaco', 'Consolas', monospace;
+    }
+
+    #controls-panel {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(10px);
+      z-index: 100;
+    }
+
+    #controls-panel h2 {
+      font-size: 14px;
+      margin-bottom: 15px;
+      color: #ff6b35;
+    }
+
+    .slider-group {
+      margin-bottom: 15px;
+    }
+
+    .slider-group label {
+      display: block;
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 5px;
+    }
+
+    .slider-group input[type="range"] {
+      width: 200px;
+      -webkit-appearance: none;
+      background: rgba(255, 255, 255, 0.1);
+      height: 4px;
+      border-radius: 2px;
+      outline: none;
+    }
+
+    .slider-group input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: #ff6b35;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .slider-value {
+      font-size: 12px;
+      color: #4ecdc4;
+      margin-top: 3px;
+      font-family: 'Monaco', 'Consolas', monospace;
+    }
+
+    button {
+      background: #ff6b35;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+      margin-bottom: 10px;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #ff8c5a;
+    }
+
+    button.secondary {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    button.secondary:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    #language-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 100;
+    }
+
+    #instructions {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #888;
+      padding: 15px;
+      border-radius: 10px;
+      font-size: 12px;
+      backdrop-filter: blur(10px);
+      z-index: 100;
+    }
+
+    #instructions kbd {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+
+    .loading {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 20px;
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <div id="info-panel">
+    <h1 id="title">Black Hole Simulator</h1>
+
+    <div class="section">
+      <h2 id="blackhole-section">Black Hole Properties</h2>
+      <div class="value">
+        <span class="label" data-i18n="mass">Mass</span>
+        <span class="number" id="mass-value">10 M☉</span>
+      </div>
+      <div class="value">
+        <span class="label" data-i18n="schwarzschild">Schwarzschild Radius</span>
+        <span class="number" id="rs-value">29.5 km</span>
+      </div>
+      <div class="value">
+        <span class="label" data-i18n="photonSphere">Photon Sphere</span>
+        <span class="number" id="photon-sphere-value">44.3 km</span>
+      </div>
+      <div class="value">
+        <span class="label" data-i18n="isco">ISCO</span>
+        <span class="number" id="isco-value">88.6 km</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2 id="observer-section">Observer</h2>
+      <div class="value">
+        <span class="label" data-i18n="distance">Distance</span>
+        <span class="number" id="observer-distance">1000 km</span>
+      </div>
+      <div class="value">
+        <span class="label" data-i18n="timeDilation">Time Dilation</span>
+        <span class="number" id="time-dilation">1.000x</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2 id="particles-section">Active Particles</h2>
+      <div class="value">
+        <span class="label" data-i18n="count">Count</span>
+        <span class="number" id="particle-count">0</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls-panel">
+    <h2 id="controls-title">Controls</h2>
+
+    <div class="slider-group">
+      <label data-i18n="blackholeMass">Black Hole Mass (M☉)</label>
+      <input type="range" id="mass-slider" min="1" max="100" value="10">
+      <div class="slider-value" id="mass-slider-value">10 M☉</div>
+    </div>
+
+    <div class="slider-group">
+      <label data-i18n="particleVelocity">Particle Initial Velocity</label>
+      <input type="range" id="velocity-slider" min="0" max="100" value="50">
+      <div class="slider-value" id="velocity-slider-value">0.5c</div>
+    </div>
+
+    <button id="launch-particle" data-i18n="launchParticle">Launch Particle</button>
+    <button id="clear-particles" class="secondary" data-i18n="clearAll">Clear All</button>
+    <button id="toggle-accretion" class="secondary" data-i18n="toggleAccretion">Toggle Accretion Disk</button>
+  </div>
+
+  <button id="language-toggle">한글 / EN</button>
+
+  <div id="instructions">
+    <div data-i18n="instruction1"><kbd>Click</kbd> Launch particle towards cursor</div>
+    <div data-i18n="instruction2"><kbd>Drag</kbd> Rotate camera</div>
+    <div data-i18n="instruction3"><kbd>Scroll</kbd> Zoom in/out</div>
+    <div><kbd>Space</kbd> Launch random particle</div>
+    <div><kbd>A</kbd> Toggle accretion disk</div>
+    <div><kbd>L</kbd> Toggle gravitational lensing</div>
+    <div><kbd>T</kbd> Toggle time dilation field</div>
+    <div><kbd>H</kbd> Toggle helper rings</div>
+    <div><kbd>C</kbd> Clear all particles</div>
+    <div><kbd>R</kbd> Toggle raytracer mode</div>
+  </div>
+
+  <div class="loading" id="loading">Loading...</div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
