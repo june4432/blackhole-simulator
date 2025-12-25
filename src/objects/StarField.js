@@ -3,9 +3,12 @@
  *
  * Creates a realistic starfield for the background
  * Stars are positioned on a distant sphere
+ *
+ * Supports real star data from Yale Bright Star Catalog
  */
 
 import * as THREE from 'three';
+import { BRIGHT_STARS, raDecToCartesian, bvToRGB, magnitudeToSize } from '../data/brightStars.js';
 
 export class StarField {
   constructor(options = {}) {
@@ -13,10 +16,192 @@ export class StarField {
     this.radius = options.radius || 500;
     this.minSize = options.minSize || 0.5;
     this.maxSize = options.maxSize || 2.0;
+    this.useRealStars = options.useRealStars !== false; // Default: true
 
     this.group = new THREE.Group();
-    this.createStars();
+
+    if (this.useRealStars) {
+      this.createRealStars();
+      this.createBackgroundStars(); // Dimmer procedural stars
+    } else {
+      this.createStars();
+    }
     this.createMilkyWay();
+  }
+
+  /**
+   * Create stars from real astronomical data (Yale Bright Star Catalog)
+   */
+  createRealStars() {
+    const realStarCount = BRIGHT_STARS.length;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(realStarCount * 3);
+    const colors = new Float32Array(realStarCount * 3);
+    const sizes = new Float32Array(realStarCount);
+
+    for (let i = 0; i < realStarCount; i++) {
+      const [ra, dec, mag, bv] = BRIGHT_STARS[i];
+
+      // Convert RA/Dec to 3D Cartesian coordinates
+      const pos = raDecToCartesian(ra, dec, this.radius);
+      positions[i * 3] = pos.x;
+      positions[i * 3 + 1] = pos.y;
+      positions[i * 3 + 2] = pos.z;
+
+      // Convert B-V color index to RGB
+      const color = bvToRGB(bv);
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
+
+      // Convert magnitude to size (brighter = larger)
+      sizes[i] = magnitudeToSize(mag, this.minSize, this.maxSize * 2);
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    // Shader material for bright real stars
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        pixelRatio: { value: window.devicePixelRatio }
+      },
+      vertexShader: `
+        attribute float size;
+        attribute vec3 color;
+        varying vec3 vColor;
+        varying float vSize;
+        uniform float time;
+        uniform float pixelRatio;
+
+        void main() {
+          vColor = color;
+          vSize = size;
+
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+
+          // Subtle twinkling for bright stars
+          float twinkle = sin(time * 1.5 + position.x * 50.0) * 0.15 + 0.85;
+
+          gl_PointSize = size * pixelRatio * (400.0 / -mvPosition.z) * twinkle;
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        varying float vSize;
+
+        void main() {
+          // Circular star with soft glow
+          float dist = length(gl_PointCoord - vec2(0.5));
+          if (dist > 0.5) discard;
+
+          // Bright core with soft glow
+          float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
+          alpha = pow(alpha, 1.2);
+
+          // Intense core for bright stars
+          float core = 1.0 - smoothstep(0.0, 0.1, dist);
+
+          vec3 finalColor = vColor * (0.8 + core * 0.5);
+          gl_FragColor = vec4(finalColor, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      vertexColors: true
+    });
+
+    this.realStars = new THREE.Points(geometry, material);
+    this.group.add(this.realStars);
+  }
+
+  /**
+   * Create dimmer background stars (procedural) to fill the sky
+   */
+  createBackgroundStars() {
+    const bgStarCount = this.starCount - BRIGHT_STARS.length;
+    if (bgStarCount <= 0) return;
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(bgStarCount * 3);
+    const colors = new Float32Array(bgStarCount * 3);
+    const sizes = new Float32Array(bgStarCount);
+
+    // Dim star colors
+    const dimColors = [
+      new THREE.Color(0xaaaaaa),
+      new THREE.Color(0xbbbbbb),
+      new THREE.Color(0x9999aa),
+    ];
+
+    for (let i = 0; i < bgStarCount; i++) {
+      // Distribute on sphere
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+
+      const x = this.radius * Math.sin(phi) * Math.cos(theta);
+      const y = this.radius * Math.sin(phi) * Math.sin(theta);
+      const z = this.radius * Math.cos(phi);
+
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+
+      // Dim colors
+      const colorIndex = Math.floor(Math.random() * dimColors.length);
+      const color = dimColors[colorIndex];
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
+
+      // Small sizes for dim stars
+      sizes[i] = 0.3 + Math.random() * 0.4;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        pixelRatio: { value: window.devicePixelRatio }
+      },
+      vertexShader: `
+        attribute float size;
+        attribute vec3 color;
+        varying vec3 vColor;
+        uniform float pixelRatio;
+
+        void main() {
+          vColor = color;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size * pixelRatio * (200.0 / -mvPosition.z);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+
+        void main() {
+          float dist = length(gl_PointCoord - vec2(0.5));
+          if (dist > 0.5) discard;
+          float alpha = (1.0 - dist * 2.0) * 0.6;
+          gl_FragColor = vec4(vColor, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      vertexColors: true
+    });
+
+    this.backgroundStars = new THREE.Points(geometry, material);
+    this.group.add(this.backgroundStars);
   }
 
   /**
@@ -213,6 +398,12 @@ export class StarField {
     if (this.stars && this.stars.material.uniforms) {
       this.stars.material.uniforms.time.value = time;
     }
+    if (this.realStars && this.realStars.material.uniforms) {
+      this.realStars.material.uniforms.time.value = time;
+    }
+    if (this.backgroundStars && this.backgroundStars.material.uniforms) {
+      this.backgroundStars.material.uniforms.time.value = time;
+    }
     if (this.milkyWay && this.milkyWay.material.uniforms) {
       this.milkyWay.material.uniforms.time.value = time;
     }
@@ -223,6 +414,9 @@ export class StarField {
    * @returns {Float32Array} Star positions
    */
   getStarPositions() {
+    if (this.realStars) {
+      return this.realStars.geometry.attributes.position.array;
+    }
     return this.stars.geometry.attributes.position.array;
   }
 
@@ -240,6 +434,14 @@ export class StarField {
     if (this.stars) {
       this.stars.geometry.dispose();
       this.stars.material.dispose();
+    }
+    if (this.realStars) {
+      this.realStars.geometry.dispose();
+      this.realStars.material.dispose();
+    }
+    if (this.backgroundStars) {
+      this.backgroundStars.geometry.dispose();
+      this.backgroundStars.material.dispose();
     }
     if (this.milkyWay) {
       this.milkyWay.geometry.dispose();

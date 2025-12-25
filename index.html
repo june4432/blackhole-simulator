@@ -248,13 +248,31 @@
 
     <div class="slider-group">
       <label data-i18n="particleVelocity">Particle Initial Velocity</label>
-      <input type="range" id="velocity-slider" min="0" max="100" value="50">
-      <div class="slider-value" id="velocity-slider-value">0.5c</div>
+      <input type="range" id="velocity-slider" min="0" max="100" value="25">
+      <div class="slider-value" id="velocity-slider-value">0.25c</div>
+    </div>
+
+    <div class="slider-group">
+      <label>⏩ Simulation Speed</label>
+      <input type="range" id="speed-slider" min="1" max="20" value="5">
+      <div class="slider-value" id="speed-slider-value">1x</div>
     </div>
 
     <button id="launch-particle" data-i18n="launchParticle">Launch Particle</button>
     <button id="clear-particles" class="secondary" data-i18n="clearAll">Clear All</button>
     <button id="toggle-accretion" class="secondary" data-i18n="toggleAccretion">Toggle Accretion Disk</button>
+
+    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+      <h3 style="font-size: 12px; color: #888; margin-bottom: 10px;">BLACK HOLE TYPE</h3>
+      <button id="toggle-kerr" class="secondary">🌀 Kerr (Rotating)</button>
+      <button id="toggle-ergosphere" class="secondary" style="display:none;">👁 Ergosphere</button>
+
+      <div class="slider-group" id="spin-group" style="display:none; margin-top: 10px;">
+        <label>Spin Parameter (a/M)</label>
+        <input type="range" id="spin-slider" min="0" max="998" value="400">
+        <div class="slider-value" id="spin-slider-value">0.400</div>
+      </div>
+    </div>
   </div>
 
   <button id="language-toggle">한글 / EN</button>
@@ -270,6 +288,8 @@
     <div><kbd>H</kbd> Toggle helper rings</div>
     <div><kbd>C</kbd> Clear all particles</div>
     <div><kbd>R</kbd> Toggle raytracer mode</div>
+    <div><kbd>K</kbd> Toggle Kerr black hole</div>
+    <div><kbd>[ ]</kbd> Adjust spin</div>
   </div>
 
   <div class="loading" id="loading">Loading...</div>

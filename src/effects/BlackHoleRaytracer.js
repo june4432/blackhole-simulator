@@ -8,6 +8,7 @@
  */
 
 import * as THREE from 'three';
+import { generateStarTexture } from '../utils/StarTexture.js';
 
 /**
  * Raytraced Black Hole with Accretion Disk
@@ -23,8 +24,15 @@ export class BlackHoleRaytracer {
     this.rs = options.schwarzschildRadius || 1;
     this.diskInnerRadius = options.diskInnerRadius || this.rs * 3;  // ISCO
     this.diskOuterRadius = options.diskOuterRadius || this.rs * 12;
+    this.useRealStars = options.useRealStars !== false;
 
     this.time = 0;
+
+    // Generate real star texture if enabled
+    if (this.useRealStars) {
+      console.log('BlackHoleRaytracer: Generating star texture...');
+      this.starTexture = generateStarTexture(2048, 1024);
+    }
 
     this.createRaytracedMesh();
   }
@@ -45,7 +53,9 @@ export class BlackHoleRaytracer {
         diskInner: { value: this.diskInnerRadius },
         diskOuter: { value: this.diskOuterRadius },
         showDisk: { value: true },
-        diskRotation: { value: 0.0 }
+        diskRotation: { value: 0.0 },
+        starTexture: { value: this.starTexture || null },
+        useRealStars: { value: this.useRealStars }
       },
       vertexShader: `
         varying vec2 vUv;
@@ -68,27 +78,23 @@ export class BlackHoleRaytracer {
         uniform float diskOuter;
         uniform bool showDisk;
         uniform float diskRotation;
+        uniform sampler2D starTexture;
+        uniform bool useRealStars;
 
         varying vec2 vUv;
 
         #define PI 3.14159265359
-        #define MAX_STEPS 200
-        #define STEP_SIZE 0.15
+        #define TWO_PI 6.28318530718
+        #define MAX_STEPS 300
+        #define STEP_SIZE 0.12
 
         // Pseudo-random for star background
         float hash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
         }
 
-        // Star field background
-        vec3 starField(vec3 dir) {
-          // Convert direction to spherical coordinates for texture lookup
-          float theta = atan(dir.z, dir.x);
-          float phi = asin(dir.y);
-
-          vec2 uv = vec2(theta / (2.0 * PI) + 0.5, phi / PI + 0.5);
-
-          // Multiple star layers
+        // Procedural star field
+        vec3 starFieldProcedural(vec3 dir, vec2 uv) {
           vec3 stars = vec3(0.0);
 
           for (float i = 1.0; i <= 3.0; i++) {
@@ -104,7 +110,6 @@ export class BlackHoleRaytracer {
               float brightness = smoothstep(starSize, 0.0, dist);
               brightness *= 0.5 + 0.5 * sin(time * 2.0 + starRand * 100.0);
 
-              // Star color based on "temperature"
               vec3 starColor = mix(
                 vec3(1.0, 0.8, 0.6),  // Warm
                 vec3(0.8, 0.9, 1.0),  // Cool
@@ -123,15 +128,42 @@ export class BlackHoleRaytracer {
           return stars;
         }
 
+        // Star field background (supports real or procedural)
+        vec3 starField(vec3 dir) {
+          float theta = atan(dir.z, dir.x);
+          float phi = asin(clamp(dir.y, -1.0, 1.0));
+          vec2 uv = vec2(theta / TWO_PI + 0.5, phi / PI + 0.5);
+
+          if (useRealStars) {
+            // Sample from precomputed star texture
+            vec3 texColor = texture2D(starTexture, uv).rgb;
+
+            // Add subtle twinkling to bright stars
+            float brightness = max(texColor.r, max(texColor.g, texColor.b));
+            float twinkle = 0.85 + 0.15 * sin(time * 2.0 + theta * 10.0 + phi * 5.0);
+            texColor *= (brightness > 0.3) ? twinkle : 1.0;
+
+            // Add milky way
+            float milkyway = smoothstep(0.3, 0.0, abs(dir.y));
+            milkyway *= 0.08 * hash(uv * 50.0);
+            texColor += vec3(0.6, 0.7, 1.0) * milkyway;
+
+            return texColor;
+          } else {
+            return starFieldProcedural(dir, uv);
+          }
+        }
+
         // Accretion disk color based on radius and angle
+        // Interstellar-style: hot white-yellow inner, orange-red outer (blackbody radiation)
         vec3 diskColor(float r, float angle, vec3 viewDir) {
           // Temperature decreases with radius (T ∝ r^(-3/4))
           float temp = pow((diskInner / r), 0.75);
 
-          // Base color from temperature
-          vec3 hotColor = vec3(1.0, 1.0, 0.9);   // White-hot inner
-          vec3 warmColor = vec3(1.0, 0.6, 0.2);  // Orange middle
-          vec3 coolColor = vec3(0.8, 0.2, 0.1);  // Red outer
+          // Interstellar-style blackbody color palette
+          vec3 hotColor = vec3(1.0, 0.95, 0.85);   // Bright white-yellow (innermost, ~10000K)
+          vec3 warmColor = vec3(1.0, 0.75, 0.35);  // Golden yellow-orange (~5000K)
+          vec3 coolColor = vec3(1.0, 0.45, 0.15);  // Deep orange-red (outer, ~3000K)
 
           vec3 baseColor;
           if (temp > 0.6) {
@@ -160,17 +192,17 @@ export class BlackHoleRaytracer {
           // Gravitational redshift
           float gravRedshift = sqrt(1.0 - rs / r);
 
-          // Apply Doppler color shift
+          // Apply Doppler color shift (enhances the warm palette)
           if (doppler > 0.0) {
-            // Blueshifted (approaching)
-            baseColor = mix(baseColor, vec3(0.5, 0.7, 1.0), doppler * 0.5);
+            // Blueshifted (approaching) - brighter yellow-white
+            baseColor = mix(baseColor, vec3(1.0, 0.95, 0.7), doppler * 0.3);
           } else {
-            // Redshifted (receding)
-            baseColor = mix(baseColor, vec3(1.0, 0.3, 0.1), -doppler * 0.3);
+            // Redshifted (receding) - deeper orange-red
+            baseColor = mix(baseColor, vec3(1.0, 0.35, 0.1), -doppler * 0.4);
           }
 
           // Turbulence/noise
-          float noise = 0.8 + 0.4 * hash(vec2(r * 10.0, angle * 5.0 + time * 0.5));
+          float noise = 0.85 + 0.3 * hash(vec2(r * 10.0, angle * 5.0 + time * 0.5));
 
           return baseColor * temp * beaming * gravRedshift * noise * 2.0;
         }
@@ -199,6 +231,7 @@ export class BlackHoleRaytracer {
         }
 
         // Raytrace through Schwarzschild spacetime
+        // Key: Allow multiple disk intersections for proper gravitational lensing
         vec4 raytrace(vec3 ro, vec3 rd) {
           vec3 pos = ro;
           vec3 dir = normalize(rd);
@@ -206,34 +239,58 @@ export class BlackHoleRaytracer {
           float alpha = 0.0;
 
           float prevY = pos.y;
-          bool hitDisk = false;
+          int diskHits = 0;
+          float lastDiskHitR = 0.0;  // Track last hit to avoid double counting
 
           for (int i = 0; i < MAX_STEPS; i++) {
             float r = length(pos);
 
             // Check event horizon
             if (r < rs * 1.01) {
-              // Fell into black hole
-              return vec4(0.0, 0.0, 0.0, 1.0);
+              // Fell into black hole - show black
+              return vec4(color, 1.0);
             }
 
-            // Check disk intersection
-            if (showDisk && !hitDisk) {
+            // Check disk intersection - ALLOW MULTIPLE HITS for lensing effect
+            if (showDisk) {
               float newY = pos.y + dir.y * STEP_SIZE;
 
-              // Check if we crossed the disk plane
-              if (prevY * newY <= 0.0) {
+              // Check if we crossed the disk plane (y changes sign)
+              if (prevY * newY <= 0.0 || (abs(pos.y) < 0.05 && abs(dir.y) > 0.01)) {
                 // Find exact intersection point
-                float t = -pos.y / dir.y;
+                float t = -pos.y / max(abs(dir.y), 0.001);
+                if (dir.y < 0.0) t = -t;
+                t = max(0.0, t);
+
                 vec3 diskHit = pos + dir * t;
                 float diskR = length(diskHit.xz);
 
-                if (diskR >= diskInner && diskR <= diskOuter) {
+                // Avoid hitting same spot twice (need minimum movement)
+                bool validHit = diskR >= diskInner && diskR <= diskOuter;
+                bool differentLocation = abs(diskR - lastDiskHitR) > 0.5 || diskHits == 0;
+
+                if (validHit && differentLocation) {
                   float angle = atan(diskHit.z, diskHit.x) + diskRotation;
                   vec3 diskCol = diskColor(diskR, angle, dir);
-                  color += diskCol;
-                  alpha = 1.0;
-                  hitDisk = true;
+
+                  // Multiple images get progressively dimmer
+                  // Primary (front): 100%, Secondary (wrapped over top): ~30%, Tertiary: ~10%
+                  float brightness = 1.0 / pow(3.0, float(diskHits));
+
+                  // Einstein ring enhancement: brighter near photon sphere
+                  float photonSphereProximity = smoothstep(rs * 2.0, rs * 1.5, r);
+                  brightness *= (1.0 + photonSphereProximity * 0.5);
+
+                  color += diskCol * brightness;
+                  alpha = min(alpha + brightness * 0.7, 1.0);
+
+                  lastDiskHitR = diskR;
+                  diskHits++;
+
+                  // Stop after 3 disk hits (primary, secondary, tertiary images)
+                  if (diskHits >= 3) {
+                    break;
+                  }
                 }
               }
               prevY = newY;
@@ -249,16 +306,23 @@ export class BlackHoleRaytracer {
             }
 
             // Gravitational light bending
-            // Acceleration toward black hole: a = -1.5 * rs / r^3 * pos
-            // This is the key equation for null geodesics in Schwarzschild
+            // The key equation: a = -1.5 * rs / r^3 * pos
+            // This causes light to curve around the black hole
             float r3 = r * r * r;
             vec3 accel = -1.5 * rs / r3 * pos;
 
-            // Adaptive step size based on distance
-            float stepSize = STEP_SIZE * (0.5 + r / 10.0);
-            stepSize = clamp(stepSize, 0.05, 0.5);
+            // Adaptive step size - SMALLER near black hole for accuracy
+            float stepSize = STEP_SIZE;
+            if (r < rs * 3.0) {
+              stepSize *= 0.25;  // Very fine steps near photon sphere
+            } else if (r < rs * 6.0) {
+              stepSize *= 0.5;
+            } else {
+              stepSize *= (0.5 + r / 10.0);
+            }
+            stepSize = clamp(stepSize, 0.02, 0.4);
 
-            // Update position and direction
+            // Update position and direction (Euler integration)
             pos += dir * stepSize;
             dir += accel * stepSize;
             dir = normalize(dir);

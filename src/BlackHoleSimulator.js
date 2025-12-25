@@ -18,6 +18,8 @@ import { ParticleManager } from './objects/Particle.js';
 import { GravitationalLens } from './effects/GravitationalLens.js';
 import { TimeDilationField } from './effects/TimeDilation.js';
 import { BlackHoleRaytracer } from './effects/BlackHoleRaytracer.js';
+import { OptimizedRaytracer } from './effects/OptimizedRaytracer.js';
+import { KerrRaytracer } from './effects/KerrRaytracer.js';
 
 import {
   schwarzschildRadiusKm,
@@ -36,9 +38,13 @@ export class BlackHoleSimulator {
     // Simulation parameters
     this.blackHoleMass = 10;  // Solar masses
     this.rs = 1;  // Schwarzschild radius in simulation units
-    this.particleVelocity = 0.5;  // Fraction of c
+    this.particleVelocity = 0.25;  // Fraction of c (lower = more curved orbits)
+    this.simulationSpeed = 1;  // Time multiplier (1x to 20x)
     this.language = 'en';
     this.raytracerMode = true;  // Start with raytracer mode (Interstellar style)
+    this.useOptimizedRaytracer = false;  // Toggle for Bruneton optimization
+    this.useKerrRaytracer = false;  // Toggle for Kerr (rotating) black hole
+    this.kerrSpin = 0.4;  // Default spin parameter (0 to ~0.998)
 
     // Initialize Three.js
     this.initRenderer();
@@ -168,7 +174,12 @@ export class BlackHoleSimulator {
    * Initialize particle manager
    */
   initParticleManager() {
-    this.particleManager = new ParticleManager(this.scene);
+    // Create a separate scene for particles (for overlay rendering in raytracer mode)
+    this.particleScene = new THREE.Scene();
+    this.particleManager = new ParticleManager(this.particleScene);
+
+    // Also add particles to main scene for standard mode
+    // We'll handle visibility switching
   }
 
   /**
@@ -199,14 +210,104 @@ export class BlackHoleSimulator {
    * Initialize raytracer for accurate black hole visualization
    */
   initRaytracer() {
+    // Original raytracer (iterative)
     this.raytracer = new BlackHoleRaytracer({
       schwarzschildRadius: this.rs,
       diskInnerRadius: this.rs * 3,
       diskOuterRadius: this.rs * 12
     });
 
+    // Optimized raytracer (Bruneton precomputed deflection)
+    // Initialize lazily to avoid startup delay
+    this.optimizedRaytracer = null;
+
     // Hide standard objects when raytracer is active
     this.updateRaytracerMode();
+  }
+
+  /**
+   * Initialize optimized raytracer (lazy loading)
+   */
+  initOptimizedRaytracer() {
+    if (!this.optimizedRaytracer) {
+      console.log('Initializing Bruneton optimized raytracer...');
+      this.optimizedRaytracer = new OptimizedRaytracer({
+        schwarzschildRadius: this.rs,
+        diskInnerRadius: this.rs * 3,
+        diskOuterRadius: this.rs * 12,
+        textureResolution: 512
+      });
+      console.log('Optimized raytracer ready.');
+    }
+  }
+
+  /**
+   * Initialize Kerr (rotating) raytracer (lazy loading)
+   */
+  initKerrRaytracer() {
+    if (!this.kerrRaytracer) {
+      console.log('Initializing Kerr (rotating) black hole raytracer...');
+      this.kerrRaytracer = new KerrRaytracer({
+        schwarzschildRadius: this.rs,
+        spin: this.kerrSpin,
+        diskOuterRadius: this.rs * 12
+      });
+      console.log(`Kerr raytracer ready. Spin = ${this.kerrSpin}`);
+    }
+  }
+
+  /**
+   * Toggle between original and optimized raytracer
+   */
+  toggleOptimizedRaytracer() {
+    this.useOptimizedRaytracer = !this.useOptimizedRaytracer;
+
+    if (this.useOptimizedRaytracer) {
+      this.initOptimizedRaytracer();
+    }
+
+    console.log(`Raytracer mode: ${this.useOptimizedRaytracer ? 'Optimized (Bruneton)' : 'Original'}`);
+    return this.useOptimizedRaytracer;
+  }
+
+  /**
+   * Toggle Kerr (rotating) black hole mode
+   */
+  toggleKerrRaytracer() {
+    this.useKerrRaytracer = !this.useKerrRaytracer;
+
+    if (this.useKerrRaytracer) {
+      this.useOptimizedRaytracer = false;  // Disable optimized when using Kerr
+      this.initKerrRaytracer();
+    }
+
+    console.log(`Black hole type: ${this.useKerrRaytracer ? 'Kerr (rotating)' : 'Schwarzschild (non-rotating)'}`);
+    return this.useKerrRaytracer;
+  }
+
+  /**
+   * Adjust Kerr spin parameter
+   */
+  adjustKerrSpin(delta) {
+    this.kerrSpin = Math.max(0, Math.min(0.998, this.kerrSpin + delta));
+    if (this.kerrRaytracer) {
+      this.kerrRaytracer.setSpin(this.kerrSpin);
+    }
+    console.log(`Kerr spin: ${this.kerrSpin.toFixed(3)}`);
+    return this.kerrSpin;
+  }
+
+  /**
+   * Get the active raytracer instance
+   */
+  getActiveRaytracer() {
+    if (this.useKerrRaytracer && this.kerrRaytracer) {
+      return this.kerrRaytracer;
+    }
+    if (this.useOptimizedRaytracer && this.optimizedRaytracer) {
+      return this.optimizedRaytracer;
+    }
+    return this.raytracer;
   }
 
   /**
@@ -252,6 +353,13 @@ export class BlackHoleSimulator {
       this.updateUI();
     });
 
+    // Speed slider
+    document.getElementById('speed-slider').addEventListener('input', (e) => {
+      this.simulationSpeed = parseFloat(e.target.value) / 5;  // 1-20 → 0.2x-4x
+      document.getElementById('speed-slider-value').textContent =
+        this.simulationSpeed.toFixed(1) + 'x';
+    });
+
     // Buttons
     document.getElementById('launch-particle').addEventListener('click', () => {
       this.launchParticle();
@@ -268,6 +376,32 @@ export class BlackHoleSimulator {
 
     document.getElementById('language-toggle').addEventListener('click', () => {
       this.toggleLanguage();
+    });
+
+    // Kerr black hole controls
+    document.getElementById('toggle-kerr').addEventListener('click', () => {
+      const isKerr = this.toggleKerrRaytracer();
+      const btn = document.getElementById('toggle-kerr');
+      btn.style.background = isKerr ? '#ff6b35' : 'rgba(255, 255, 255, 0.1)';
+      document.getElementById('spin-group').style.display = isKerr ? 'block' : 'none';
+      document.getElementById('toggle-ergosphere').style.display = isKerr ? 'inline-block' : 'none';
+    });
+
+    document.getElementById('toggle-ergosphere').addEventListener('click', () => {
+      if (this.useKerrRaytracer && this.kerrRaytracer) {
+        const enabled = this.kerrRaytracer.toggleErgosphere();
+        const btn = document.getElementById('toggle-ergosphere');
+        btn.style.background = enabled ? '#ff6b35' : 'rgba(255, 255, 255, 0.1)';
+      }
+    });
+
+    document.getElementById('spin-slider').addEventListener('input', (e) => {
+      const spin = parseFloat(e.target.value) / 1000;
+      this.kerrSpin = spin;
+      if (this.kerrRaytracer) {
+        this.kerrRaytracer.setSpin(spin);
+      }
+      document.getElementById('spin-slider-value').textContent = spin.toFixed(3);
     });
 
     this.updateUI();
@@ -331,6 +465,52 @@ export class BlackHoleSimulator {
           // Toggle raytracer mode
           this.toggleRaytracerMode();
           break;
+        case 'o':
+          // Toggle optimized raytracer (Bruneton)
+          if (this.raytracerMode) {
+            this.toggleOptimizedRaytracer();
+          }
+          break;
+        case 'm':
+          // Toggle multiple images in optimized raytracer
+          if (this.useOptimizedRaytracer && this.optimizedRaytracer) {
+            const enabled = this.optimizedRaytracer.toggleMultipleImages();
+            console.log(`Multiple images: ${enabled ? 'ON' : 'OFF'}`);
+          }
+          break;
+        case 'k':
+          // Toggle Kerr (rotating) black hole
+          if (this.raytracerMode) {
+            const isKerr = this.toggleKerrRaytracer();
+            const btn = document.getElementById('toggle-kerr');
+            btn.style.background = isKerr ? '#ff6b35' : 'rgba(255, 255, 255, 0.1)';
+            document.getElementById('spin-group').style.display = isKerr ? 'block' : 'none';
+            document.getElementById('toggle-ergosphere').style.display = isKerr ? 'inline-block' : 'none';
+          }
+          break;
+        case 'e':
+          // Toggle ergosphere visualization (Kerr only)
+          if (this.useKerrRaytracer && this.kerrRaytracer) {
+            const enabled = this.kerrRaytracer.toggleErgosphere();
+            console.log(`Ergosphere: ${enabled ? 'ON' : 'OFF'}`);
+          }
+          break;
+        case '[':
+          // Decrease Kerr spin
+          if (this.useKerrRaytracer) {
+            const spin = this.adjustKerrSpin(-0.05);
+            document.getElementById('spin-slider').value = spin * 1000;
+            document.getElementById('spin-slider-value').textContent = spin.toFixed(3);
+          }
+          break;
+        case ']':
+          // Increase Kerr spin
+          if (this.useKerrRaytracer) {
+            const spin = this.adjustKerrSpin(0.05);
+            document.getElementById('spin-slider').value = spin * 1000;
+            document.getElementById('spin-slider-value').textContent = spin.toFixed(3);
+          }
+          break;
       }
     });
   }
@@ -351,10 +531,11 @@ export class BlackHoleSimulator {
    */
   launchParticle() {
     const angle = Math.random() * Math.PI * 2;
-    const startRadius = 8 + Math.random() * 4;  // Start at 8-12 rs
+    const startRadius = 6 + Math.random() * 3;  // Start at 6-9 rs (closer to black hole)
 
-    // Random velocity angle (mostly inward with some tangential)
-    const velocityAngle = (Math.random() - 0.5) * Math.PI * 0.8;
+    // Velocity angle with significant tangential component for visible orbits
+    // Range: 0.3π to 0.7π (mostly tangential, some inward)
+    const velocityAngle = 0.3 * Math.PI + Math.random() * 0.4 * Math.PI;
 
     this.particleManager.createParticle({
       r: startRadius,
@@ -482,9 +663,15 @@ export class BlackHoleSimulator {
       this.gravitationalLens.onResize(window.innerWidth, window.innerHeight);
     }
 
-    // Update raytracer
+    // Update raytracers
     if (this.raytracer) {
       this.raytracer.onResize(window.innerWidth, window.innerHeight);
+    }
+    if (this.optimizedRaytracer) {
+      this.optimizedRaytracer.onResize(window.innerWidth, window.innerHeight);
+    }
+    if (this.kerrRaytracer) {
+      this.kerrRaytracer.onResize(window.innerWidth, window.innerHeight);
     }
   }
 
@@ -518,11 +705,12 @@ export class BlackHoleSimulator {
     }
 
     // Update particles (physics simulation)
-    const physicsStepsPerFrame = 5;
-    const physicsTimeStep = 0.02;
+    // Keep time step small for numerical stability, increase iterations for speed
+    const baseTimeStep = 0.01;  // Small fixed step for accuracy
+    const physicsStepsPerFrame = Math.round(10 * this.simulationSpeed);
 
     for (let i = 0; i < physicsStepsPerFrame; i++) {
-      this.particleManager.update(physicsTimeStep);
+      this.particleManager.update(baseTimeStep);
     }
 
     // Periodically update UI
@@ -531,14 +719,39 @@ export class BlackHoleSimulator {
     }
 
     // Render based on mode
-    if (this.raytracerMode && this.raytracer) {
-      // Update and render raytracer
-      this.raytracer.update(this.camera, deltaTime);
-      this.raytracer.render(this.renderer);
+    if (this.raytracerMode) {
+      // Update and render active raytracer
+      const activeRaytracer = this.getActiveRaytracer();
+      if (activeRaytracer) {
+        activeRaytracer.update(this.camera, deltaTime);
+        activeRaytracer.render(this.renderer);
+      }
+
+      // Overlay particles on top of raytracer
+      if (this.particleManager.getCount() > 0) {
+        // Clear only depth buffer, preserve color (raytracer output)
+        this.renderer.autoClear = false;
+        this.renderer.clearDepth();
+        this.renderer.render(this.particleScene, this.camera);
+        this.renderer.autoClear = true;
+      }
     } else if (this.gravitationalLens && this.gravitationalLens.enabled) {
       this.gravitationalLens.render();
+      // Also render particles
+      if (this.particleManager.getCount() > 0) {
+        this.renderer.autoClear = false;
+        this.renderer.render(this.particleScene, this.camera);
+        this.renderer.autoClear = true;
+      }
     } else {
+      // Standard mode: render main scene
       this.renderer.render(this.scene, this.camera);
+      // Particles are in particleScene, render them too
+      if (this.particleManager.getCount() > 0) {
+        this.renderer.autoClear = false;
+        this.renderer.render(this.particleScene, this.camera);
+        this.renderer.autoClear = true;
+      }
     }
   }
 
@@ -581,6 +794,14 @@ export class BlackHoleSimulator {
 
     if (this.raytracer) {
       this.raytracer.dispose();
+    }
+
+    if (this.optimizedRaytracer) {
+      this.optimizedRaytracer.dispose();
+    }
+
+    if (this.kerrRaytracer) {
+      this.kerrRaytracer.dispose();
     }
 
     this.renderer.dispose();

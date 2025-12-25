@@ -57,7 +57,6 @@ export class Particle {
     });
 
     this.mesh = new THREE.Mesh(geometry, material);
-    this.updatePosition();
     this.group.add(this.mesh);
 
     // Glow effect
@@ -90,6 +89,9 @@ export class Particle {
 
     this.glow = new THREE.Mesh(glowGeometry, glowMaterial);
     this.mesh.add(this.glow);
+
+    // Set initial position after all meshes are created
+    this.updatePosition();
   }
 
   /**
@@ -255,7 +257,7 @@ export class Particle {
     this.properTime += dt * dilationFactor;
 
     // Check termination conditions
-    if (r <= 1.01) {  // Crossed event horizon
+    if (r <= 1.5) {  // Close to event horizon (terminate before numerical instability)
       this.alive = false;
       this.terminated = 'horizon';
       return false;
