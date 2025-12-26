@@ -27,9 +27,10 @@ import { effectivePotential, particleVelocities, toCoordinateVelocities } from '
 export function geodesicDerivatives(state, rs = 1) {
   const [r, phi, dr_dt, dphi_dt] = state;
 
-  // Prevent singularity
-  if (r <= rs) {
-    return [dr_dt, dphi_dt, -1e10, 0];  // Force inward acceleration
+  // Prevent singularity - particle will be removed by Particle.step() anyway
+  // Visual horizon is at ~2.6rs due to gravitational lensing
+  if (r <= rs * 2.6) {
+    return [dr_dt, dphi_dt, -1e10, 0];
   }
 
   const f = 1 - rs / r;          // Metric factor (1 - rs/r)

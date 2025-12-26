@@ -238,32 +238,49 @@ export class Particle {
 
   /**
    * Integrate equations of motion for one time step
+   * 
    * @param {number} dt - Coordinate time step
+   * @param {number} rs - Schwarzschild radius (default 1)
    * @returns {boolean} True if particle is still alive
    */
-  step(dt) {
+  step(dt, rs = 1) {
     if (!this.alive) return false;
 
-    // Store current position for trail
-    this.trajectory.push([...this.state]);
+    const prevR = this.state[0];
 
-    // RK4 integration step
-    this.state = rk4Step(this.state, dt);
-    this.coordinateTime += dt;
+    // Visual black hole radius (due to gravitational lensing, the black region
+    // appears larger than the event horizon - roughly 2.6rs)
+    const visualHorizonRadius = rs * 2.6;
 
-    // Update proper time (approximate)
-    const r = this.state[0];
-    const dilationFactor = timeDilationFactor(r);
-    this.properTime += dt * dilationFactor;
-
-    // Check termination conditions
-    if (r <= 1.5) {  // Close to event horizon (terminate before numerical instability)
+    // Inside visual black hole region - disappear immediately
+    if (prevR <= visualHorizonRadius) {
       this.alive = false;
       this.terminated = 'horizon';
       return false;
     }
 
-    if (r > 100 && this.state[2] > 0) {  // Escaped
+    // Store current position for trail
+    this.trajectory.push([...this.state]);
+
+    // RK4 integration
+    this.state = rk4Step(this.state, dt, rs);
+    this.coordinateTime += dt;
+
+    const r = this.state[0];
+
+    // Update proper time (approximate)
+    const dilationFactor = timeDilationFactor(r);
+    this.properTime += dt * dilationFactor;
+
+    // Event horizon check - disappear when entering visual black region
+    if (r <= visualHorizonRadius) {
+      this.alive = false;
+      this.terminated = 'horizon';
+      return false;
+    }
+
+    // Escaped check (far away and moving outward)
+    if (r > 100 && this.state[2] > 0) {
       this.alive = false;
       this.terminated = 'escaped';
       return false;

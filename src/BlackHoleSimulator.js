@@ -354,7 +354,13 @@ export class BlackHoleSimulator {
     });
 
     // Speed slider
-    document.getElementById('speed-slider').addEventListener('input', (e) => {
+    const speedSlider = document.getElementById('speed-slider');
+    // Sync initial value from slider (in case browser restored previous value)
+    this.simulationSpeed = parseFloat(speedSlider.value) / 5;
+    document.getElementById('speed-slider-value').textContent =
+      this.simulationSpeed.toFixed(1) + 'x';
+    
+    speedSlider.addEventListener('input', (e) => {
       this.simulationSpeed = parseFloat(e.target.value) / 5;  // 1-20 → 0.2x-4x
       document.getElementById('speed-slider-value').textContent =
         this.simulationSpeed.toFixed(1) + 'x';

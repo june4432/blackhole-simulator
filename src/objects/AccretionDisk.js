@@ -113,18 +113,30 @@ export class AccretionDisk {
         varying float vOrbitalVelocity;
         varying float vTemperature;
 
-        // Color temperature to RGB (simplified blackbody)
+        // Color temperature to RGB - Realistic accretion disk colors
+        // Based on blackbody radiation and Interstellar-style visualization
         vec3 temperatureToColor(float t) {
-          // t is normalized 0-1
-          // Hotter = bluer, cooler = redder
-          vec3 hot = vec3(0.8, 0.9, 1.0);   // Blue-white
-          vec3 warm = vec3(1.0, 0.8, 0.3);  // Yellow-orange
-          vec3 cool = vec3(1.0, 0.3, 0.1);  // Red
-
-          if (t > 0.5) {
-            return mix(warm, hot, (t - 0.5) * 2.0);
+          // t is normalized 0-1 (1 = hottest near ISCO)
+          // Real accretion disks: innermost is ~10^7K (blue-white), outer ~10^4K (red-orange)
+          
+          vec3 innerHot = vec3(1.0, 1.0, 1.0);      // Brilliant white (hottest core)
+          vec3 hot = vec3(0.95, 0.9, 1.0);          // Blue-white  
+          vec3 warm = vec3(1.0, 0.7, 0.3);          // Golden orange
+          vec3 cool = vec3(0.9, 0.3, 0.05);         // Deep red-orange
+          vec3 outer = vec3(0.5, 0.1, 0.02);        // Dark red (cooler outer edge)
+          
+          if (t > 0.85) {
+            // Innermost region - brilliant white core
+            return mix(hot, innerHot, (t - 0.85) / 0.15);
+          } else if (t > 0.5) {
+            // Hot region - blue-white to golden
+            return mix(warm, hot, (t - 0.5) / 0.35);
+          } else if (t > 0.2) {
+            // Warm region - golden to red-orange  
+            return mix(cool, warm, (t - 0.2) / 0.3);
           } else {
-            return mix(cool, warm, t * 2.0);
+            // Outer cool region
+            return mix(outer, cool, t / 0.2);
           }
         }
 
@@ -151,11 +163,11 @@ export class AccretionDisk {
 
           // Apply Doppler color shift
           if (totalShift < 0.0) {
-            // Blueshift
-            baseColor = mix(baseColor, vec3(0.5, 0.7, 1.0), min(1.0, -totalShift * 0.5));
+            // Blueshift - approaching side glows blue-white
+            baseColor = mix(baseColor, vec3(0.7, 0.85, 1.0), min(1.0, -totalShift * 0.6));
           } else {
-            // Redshift
-            baseColor = mix(baseColor, vec3(1.0, 0.2, 0.0), min(1.0, totalShift * 0.3));
+            // Redshift - receding side shifts to deep orange-red
+            baseColor = mix(baseColor, vec3(1.0, 0.35, 0.05), min(1.0, totalShift * 0.4));
           }
 
           // Doppler beaming (approaching side is brighter)
@@ -177,7 +189,12 @@ export class AccretionDisk {
           float normalizedR = (vRadius - innerRadius) / (outerRadius - innerRadius);
           float edgeFade = smoothstep(0.0, 0.1, normalizedR) * smoothstep(1.0, 0.9, normalizedR);
 
-          vec3 finalColor = baseColor * intensity * 1.5;
+          // Boost brightness for dramatic effect
+          vec3 finalColor = baseColor * intensity * 2.0;
+          
+          // Add subtle bloom effect on hottest parts
+          float bloom = pow(vTemperature, 3.0) * 0.3;
+          finalColor += vec3(1.0, 0.9, 0.8) * bloom;
 
           gl_FragColor = vec4(finalColor, edgeFade * 0.9);
         }
@@ -233,9 +250,12 @@ export class AccretionDisk {
           float glow = 1.0 - abs(normalizedR - 0.5) * 2.0;
           glow = pow(glow, 3.0);
 
-          vec3 color = vec3(1.0, 0.6, 0.2) * glow * 0.3;
+          // Warmer golden glow with gradient
+          vec3 innerGlow = vec3(1.0, 0.8, 0.5);   // Golden center
+          vec3 outerGlow = vec3(1.0, 0.4, 0.1);   // Orange-red edge
+          vec3 color = mix(outerGlow, innerGlow, 1.0 - normalizedR) * glow * 0.4;
 
-          gl_FragColor = vec4(color, glow * 0.3);
+          gl_FragColor = vec4(color, glow * 0.35);
         }
       `,
       transparent: true,
